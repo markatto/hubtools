@@ -24,11 +24,38 @@ pub use archive_builder::HubrisArchiveBuilder;
 pub use bootleby::bootleby_to_archive;
 pub use caboose::{Caboose, CabooseBuilder, CabooseError};
 
+/// ELF machine type for the target architecture
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ElfMachine {
+    #[default]
+    Arm,
+    RiscV,
+}
+
+impl ElfMachine {
+    /// Get the ELF e_machine value
+    pub fn e_machine(&self) -> u16 {
+        match self {
+            ElfMachine::Arm => object::elf::EM_ARM,
+            ElfMachine::RiscV => object::elf::EM_RISCV,
+        }
+    }
+
+    /// Get the ELF OS ABI value
+    pub fn os_abi(&self) -> u8 {
+        match self {
+            ElfMachine::Arm => object::elf::ELFOSABI_ARM,
+            ElfMachine::RiscV => object::elf::ELFOSABI_NONE,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct RawHubrisImage {
     pub start_addr: u32,
     pub data: Vec<u8>,
     pub kentry: u32,
+    pub machine: ElfMachine,
 }
 
 impl RawHubrisImage {
@@ -36,6 +63,7 @@ impl RawHubrisImage {
         data: &BTreeMap<u32, Vec<u8>>,
         kentry: u32,
         gap_fill: u8,
+        machine: ElfMachine,
     ) -> Result<Self, Error> {
         let mut prev: Option<u32> = None;
         let mut out = vec![];
@@ -54,6 +82,7 @@ impl RawHubrisImage {
             start_addr,
             data: out,
             kentry,
+            machine,
         })
     }
 
@@ -61,10 +90,11 @@ impl RawHubrisImage {
         data: Vec<u8>,
         start_addr: u32,
         kentry: u32,
+        machine: ElfMachine,
     ) -> Result<Self, Error> {
         let mut segments = BTreeMap::new();
         segments.insert(start_addr, data);
-        Self::from_segments(&segments, kentry, 0xFF)
+        Self::from_segments(&segments, kentry, 0xFF, machine)
     }
 
     /// Convert a not hubris binary into a hubris archive
@@ -73,6 +103,13 @@ impl RawHubrisImage {
         if elf.format() != object::BinaryFormat::Elf {
             return Err(Error::NotAnElf(elf.format()));
         }
+
+        // Detect machine type from the ELF
+        let machine = match elf.architecture() {
+            object::Architecture::Arm => ElfMachine::Arm,
+            object::Architecture::Riscv32 | object::Architecture::Riscv64 => ElfMachine::RiscV,
+            _ => ElfMachine::Arm, // Default to ARM for backwards compatibility
+        };
 
         let mut segments: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
 
@@ -84,7 +121,7 @@ impl RawHubrisImage {
             }
         }
 
-        Self::from_segments(&segments, elf.entry().try_into().unwrap(), 0xFF)
+        Self::from_segments(&segments, elf.entry().try_into().unwrap(), 0xFF, machine)
     }
 
     /// For elfs from previously produced hubris archives
@@ -93,6 +130,13 @@ impl RawHubrisImage {
         if elf.format() != object::BinaryFormat::Elf {
             return Err(Error::NotAnElf(elf.format()));
         }
+
+        // Detect machine type from the ELF
+        let machine = match elf.architecture() {
+            object::Architecture::Arm => ElfMachine::Arm,
+            object::Architecture::Riscv32 | object::Architecture::Riscv64 => ElfMachine::RiscV,
+            _ => ElfMachine::Arm, // Default to ARM for backwards compatibility
+        };
 
         let mut segments: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
         let code_flags = object::SectionFlags::Elf {
@@ -106,7 +150,7 @@ impl RawHubrisImage {
                 );
             }
         }
-        Self::from_segments(&segments, elf.entry().try_into().unwrap(), 0xFF)
+        Self::from_segments(&segments, elf.entry().try_into().unwrap(), 0xFF, machine)
     }
 
     /// Converts the raw image to an ELF file
@@ -128,9 +172,9 @@ impl RawHubrisImage {
             abi_version: 0,
             e_entry: self.kentry as u64,
             e_flags: 0,
-            e_machine: object::elf::EM_ARM,
+            e_machine: self.machine.e_machine(),
             e_type: object::elf::ET_REL,
-            os_abi: object::elf::ELFOSABI_ARM,
+            os_abi: self.machine.os_abi(),
         };
         w.reserve_file_header();
         w.reserve_program_headers(1);

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::header;
+use crate::ElfMachine;
 use crate::Error;
 use crate::RawHubrisImage;
 use crate::CABOOSE_MAGIC;
@@ -64,7 +65,7 @@ impl HubrisArchiveBuilder {
             .unwrap();
 
         let image =
-            RawHubrisImage::from_binary(data.into_inner(), 0, 0).unwrap();
+            RawHubrisImage::from_binary(data.into_inner(), 0, 0, ElfMachine::default()).unwrap();
 
         // Ensure our caboose staging above was correct.
         assert_eq!(
