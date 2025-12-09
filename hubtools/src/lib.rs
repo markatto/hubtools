@@ -173,7 +173,7 @@ impl RawHubrisImage {
             e_entry: self.kentry as u64,
             e_flags: 0,
             e_machine: self.machine.e_machine(),
-            e_type: object::elf::ET_REL,
+            e_type: object::elf::ET_EXEC,
             os_abi: self.machine.os_abi(),
         };
         w.reserve_file_header();
